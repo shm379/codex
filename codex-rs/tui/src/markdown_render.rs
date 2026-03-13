@@ -19,6 +19,7 @@ use pulldown_cmark::Options;
 use pulldown_cmark::Parser;
 use pulldown_cmark::Tag;
 use pulldown_cmark::TagEnd;
+use ratatui::layout::Alignment;
 use ratatui::style::Style;
 use ratatui::text::Line;
 use ratatui::text::Span;
@@ -647,6 +648,7 @@ where
 
     fn push_line(&mut self, line: Line<'static>) {
         self.flush_current_line();
+        let line_alignment = detect_line_alignment(&line);
         let blockquote_active = self
             .indent_stack
             .iter()
@@ -661,7 +663,7 @@ where
         self.current_initial_indent = self.prefix_spans(was_pending);
         self.current_subsequent_indent = self.prefix_spans(false);
         self.current_line_style = style;
-        self.current_line_content = Some(line);
+        self.current_line_content = Some(line.alignment(line_alignment));
         self.current_line_in_code_block = self.in_code_block;
         self.line_ends_with_local_link_target = false;
 
@@ -718,6 +720,37 @@ where
 
         prefix
     }
+}
+
+fn detect_line_alignment(line: &Line<'_>) -> Alignment {
+    for c in line
+        .spans
+        .iter()
+        .flat_map(|span| span.content.chars())
+        .filter(|c| !c.is_whitespace() && !c.is_ascii_punctuation())
+    {
+        if is_rtl_char(c) {
+            return Alignment::Right;
+        }
+        if c.is_alphabetic() || c.is_ascii_digit() {
+            return Alignment::Left;
+        }
+    }
+
+    Alignment::Left
+}
+
+fn is_rtl_char(c: char) -> bool {
+    matches!(
+        c,
+        '\u{0590}'..='\u{05FF}'
+            | '\u{0600}'..='\u{06FF}'
+            | '\u{0750}'..='\u{077F}'
+            | '\u{08A0}'..='\u{08FF}'
+            | '\u{FB1D}'..='\u{FDFF}'
+            | '\u{FE70}'..='\u{FEFF}'
+            | '\u{10800}'..='\u{10FFF}'
+    )
 }
 
 fn is_local_path_like_link(dest_url: &str) -> bool {
@@ -1124,5 +1157,17 @@ mod tests {
             vec!["fn main() {}".to_string(), "    line2".to_string()],
             "CRLF code block should not produce extra blank lines: {lines:?}"
         );
+    }
+
+    #[test]
+    fn aligns_rtl_text_to_the_right() {
+        let rendered = render_markdown_text("سلام دنیا");
+        assert_eq!(rendered.lines[0].alignment, Some(Alignment::Right));
+    }
+
+    #[test]
+    fn keeps_ltr_text_left_aligned() {
+        let rendered = render_markdown_text("hello world");
+        assert_eq!(rendered.lines[0].alignment, Some(Alignment::Left));
     }
 }
